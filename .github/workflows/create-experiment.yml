@@ -52,9 +52,11 @@ jobs:
         id: gate
         run: |
           body="${{ github.event.issue.body || '' }}"
-          labels="${{ toJson(github.event.issue.labels) }}"
-          if echo "$body" | grep -q "### Experiment ID"; then echo "ok=true" >> $GITHUB_OUTPUT; else echo "ok=false" >> $GITHUB_OUTPUT; fi
-          echo "labels=$labels" >> $GITHUB_OUTPUT
+          if echo "$body" | grep -q "### Experiment ID"; then
+            echo "ok=true" >> $GITHUB_OUTPUT
+          else
+            echo "ok=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Stop if not our issue
         if: steps.gate.outputs.ok != 'true'
