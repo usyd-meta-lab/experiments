@@ -45,6 +45,14 @@ jobs:
       - name: Build catalog (experiments.json)
         run: node scripts/indexer.mjs
 
+      # ➜ NEW: include your static site files in the artifact
+      - name: Copy site files to public/
+        run: |
+          mkdir -p public
+          cp -f index.html public/index.html
+          # If you later add CSS/JS/assets, copy them too:
+          # rsync -av --delete --exclude 'public' ./site/ ./public/   # (if you keep a /site folder)
+
       - name: Upload artifact for GitHub Pages
         uses: actions/upload-pages-artifact@v3
         with:
