@@ -177,7 +177,6 @@ jobs:
           PY
 
       - name: Commit files
-        if: steps.gate.outputs.ok == 'true'
         run: |
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
@@ -186,7 +185,9 @@ jobs:
             echo "No changes to commit."
           else
             git commit -m "Create/update experiment metadata from issue"
-            git push
+            # Make sure branch is up to date before pushing
+            git pull --rebase origin main
+            git push origin main
           fi
 
       - name: Comment back on issue (success)
