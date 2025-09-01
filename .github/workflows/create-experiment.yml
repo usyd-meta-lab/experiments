@@ -2,7 +2,8 @@ name: Create experiment from issue
 
 on:
   issues:
-    types: [opened, edited]
+    types: [opened, edited, labeled]
+  workflow_dispatch: {}  # Manual "Run workflow" button
 
 permissions:
   contents: write
@@ -10,20 +11,62 @@ permissions:
 
 jobs:
   create:
-    # Only run if the issue has the "new-experiment" label
-    if: contains(join(github.event.issue.labels.*.name, ','), 'new-experiment')
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
 
-      - name: Set up Python deps
+      - name: Ensure label exists (new-experiment)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labelName = "new-experiment";
+            try {
+              await github.rest.issues.getLabel({...context.repo, name: labelName});
+            } catch {
+              await github.rest.issues.createLabel({
+                ...context.repo,
+                name: labelName,
+                color: "0e8a16",
+                description: "Triggers experiment folder creation"
+              });
+            }
+
+      - name: Auto-label issue if it looks like the form
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.issue?.body || "";
+            const hasHeader = body.includes("### Experiment ID");
+            const hasLabel = (context.payload.issue?.labels || []).some(l => l.name === "new-experiment");
+            if (hasHeader && !hasLabel) {
+              await github.rest.issues.addLabels({
+                ...context.repo,
+                issue_number: context.issue.number,
+                labels: ["new-experiment"]
+              });
+            }
+
+      - name: Short-circuit unless this is our form
+        id: gate
         run: |
-          python3 -V
+          body="${{ github.event.issue.body || '' }}"
+          labels="${{ toJson(github.event.issue.labels) }}"
+          if echo "$body" | grep -q "### Experiment ID"; then echo "ok=true" >> $GITHUB_OUTPUT; else echo "ok=false" >> $GITHUB_OUTPUT; fi
+          echo "labels=$labels" >> $GITHUB_OUTPUT
+
+      - name: Stop if not our issue
+        if: steps.gate.outputs.ok != 'true'
+        run: echo "This issue doesn't look like the New experiment form. Skipping."
+
+      - name: Set up Python deps
+        if: steps.gate.outputs.ok == 'true'
+        run: |
           python3 -m pip install --quiet pyyaml
 
-      - name: Parse Issue Form → JSON payload
+      - name: Parse Issue Form → JSON payload (with debug)
+        if: steps.gate.outputs.ok == 'true'
         id: parse
         env:
           ISSUE_BODY: ${{ github.event.issue.body }}
@@ -33,131 +76,127 @@ jobs:
 
           body = os.environ.get("ISSUE_BODY", "")
 
-          # Extract content under "### <Label>" until next "### " or end
+          def clean(v:str) -> str:
+            v = (v or "").strip()
+            return "" if v in ("_No response_", "No response", "(none)") else v
+
           def get_block(label:str) -> str:
-              m = re.search(rf"^### {re.escape(label)}\s*\n\n([\s\S]*?)(?=\n^### |\Z)", body, re.M)
-              if not m:
-                  return ""
-              val = m.group(1).strip()
-              # Strip fenced code blocks if present
-              if val.startswith("```") and val.endswith("```"):
-                  val = "\n".join(val.splitlines()[1:-1]).strip()
-              return val
+            m = re.search(rf"^### {re.escape(label)}\s*\n\n([\s\S]*?)(?=\n^### |\Z)", body, re.M)
+            if not m:
+              return ""
+            val = m.group(1).strip()
+            if val.startswith("```") and val.endswith("```"):
+              val = "\n".join(val.splitlines()[1:-1]).strip()
+            return clean(val)
 
           data = {
-              "id":          get_block("Experiment ID"),
-              "title":       get_block("Title"),
-              "description": get_block("Description"),
-              "status":      get_block("Status") or "draft",
-              "short_title": get_block("Short title"),
+            "id":          clean(get_block("Experiment ID")),
+            "title":       clean(get_block("Title")),
+            "description": clean(get_block("Description")),
+            "status":      clean(get_block("Status")) or "draft",
+            "short_title": clean(get_block("Short title")),
           }
 
-          # Comma-separated → arrays
-          authors = [a.strip() for a in get_block("Authors (comma-separated)").split(",") if a.strip()]
-          tags    = [t.strip() for t in get_block("Tags (comma-separated)").split(",") if t.strip()]
+          authors = [a.strip() for a in clean(get_block("Authors (comma-separated)")).split(",") if a.strip()]
+          tags    = [t.strip() for t in clean(get_block("Tags (comma-separated)")).split(",") if t.strip()]
           if authors: data["authors"] = authors
           if tags:    data["tags"] = tags
 
-          # Optional single-line extras
-          ethics_id = get_block("Ethics ID")
+          ethics_id = clean(get_block("Ethics ID"))
           if ethics_id:
-              data.setdefault("ethics", {})["id"] = ethics_id
+            data.setdefault("ethics", {})["id"] = ethics_id
 
-          datapipes = [d.strip() for d in get_block("DataPipe IDs (comma-separated)").split(",") if d.strip()]
+          dp = clean(get_block("DataPipe IDs (comma-separated)"))
+          datapipes = [d.strip() for d in dp.split(",") if d.strip()]
           if datapipes:
-              data.setdefault("data", {})["datapipes"] = datapipes
+            data.setdefault("data", {})["datapipes"] = datapipes
 
-          # YAML blocks
-          for key, label in [
-              ("links",    "Links (YAML)"),
-              ("sample",   "Sample (YAML, optional)"),
-              ("measures", "Measures (YAML list, optional)"),
+          for key,label in [
+            ("links",    "Links (YAML)"),
+            ("sample",   "Sample (YAML, optional)"),
+            ("measures", "Measures (YAML list, optional)"),
           ]:
-              raw = get_block(label)
-              if raw:
-                  try:
-                      val = yaml.safe_load(raw)
-                      if val is not None:
-                          data[key] = val
-                  except Exception:
-                      pass
+            raw = get_block(label)
+            if raw:
+              try:
+                val = yaml.safe_load(raw)
+                if val is not None:
+                  data[key] = val
+              except Exception:
+                pass
 
-          # Freeform extra YAML (merged last)
           extra = get_block("Extra YAML (optional)")
           if extra:
-              try:
-                  more = yaml.safe_load(extra)
-                  if isinstance(more, dict):
-                      data.update(more)
-              except Exception:
-                  pass
+            try:
+              more = yaml.safe_load(extra)
+              if isinstance(more, dict):
+                data.update(more)
+            except Exception:
+              pass
+
+          # Debug table
+          def dbg(key): return data.get(key, "")
+          print("Parsed fields:")
+          print(f"  id          : {dbg('id')}")
+          print(f"  title       : {dbg('title')}")
+          print(f"  status      : {dbg('status')}")
+          print(f"  authors     : {dbg('authors')}")
+          print(f"  tags        : {dbg('tags')}")
 
           if not data.get("id"):
-              print("::error::Missing 'Experiment ID' in Issue Form.")
-              sys.exit(1)
+            print("::error::Missing 'Experiment ID' in Issue. Ensure the Issue Form label is exactly 'Experiment ID'.")
+            sys.exit(1)
 
-          payload = json.dumps(data, separators=(',', ':'), ensure_ascii=False)
-
-          # Emit output safely (multiline/characters) via $GITHUB_OUTPUT
+          payload = json.dumps(data, ensure_ascii=False)
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-              fh.write("payload<<EOF\n")
-              fh.write(payload)
-              fh.write("\nEOF\n")
+            fh.write("payload<<EOF\n"); fh.write(payload); fh.write("\nEOF\n")
           PY
 
       - name: Create/merge metadata.yml in experiments/<id>/
+        if: steps.gate.outputs.ok == 'true'
         env:
           PAYLOAD: ${{ steps.parse.outputs.payload }}
         run: |
           python3 - <<'PY'
           import os, json, yaml, datetime, pathlib
-
           data = json.loads(os.environ["PAYLOAD"])
           eid  = data["id"]
-
           base_dir = pathlib.Path("experiments") / eid
           meta_path = base_dir / "metadata.yml"
           base_dir.mkdir(parents=True, exist_ok=True)
-
           if meta_path.exists():
-            with open(meta_path, "r", encoding="utf-8") as f:
-              meta = yaml.safe_load(f) or {}
+            meta = yaml.safe_load(open(meta_path, "r", encoding="utf-8")) or {}
           else:
-            meta = {
-              "id": eid,
-              "version": "1.0.0",
-              "date_created": datetime.date.today().isoformat(),
-            }
-
+            meta = {"id": eid, "version": "1.0.0", "date_created": datetime.date.today().isoformat()}
           meta.update(data)
           meta["date_updated"] = datetime.date.today().isoformat()
-
           with open(meta_path, "w", encoding="utf-8") as f:
             yaml.safe_dump(meta, f, sort_keys=False, allow_unicode=True)
           PY
 
       - name: Commit files
+        if: steps.gate.outputs.ok == 'true'
         run: |
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
           git add experiments/**/metadata.yml
           if git diff --cached --quiet; then
             echo "No changes to commit."
-          else:
+          else
             git commit -m "Create/update experiment metadata from issue"
             git push
           fi
 
-      - name: Comment back on issue
+      - name: Comment back on issue (success)
+        if: steps.gate.outputs.ok == 'true'
         uses: actions/github-script@v7
         with:
           script: |
             const payload = JSON.parse(core.getInput('payload'));
             const id = payload.id;
-            const path = `experiments/${id}/metadata.yml`;
             await github.rest.issues.createComment({
               ...context.repo,
               issue_number: context.issue.number,
-              body: `✅ Created/updated \`${path}\`.\n\nEdit that file as needed; the catalog will rebuild automatically on push.`
+              body: `✅ Created/updated \`experiments/${id}/metadata.yml\`. The catalog will rebuild automatically.`
             });
           payload: ${{ steps.parse.outputs.payload }}
