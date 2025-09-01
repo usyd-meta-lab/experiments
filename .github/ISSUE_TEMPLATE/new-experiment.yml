@@ -1,0 +1,106 @@
+name: "New experiment"
+description: "Create an experiment folder with metadata"
+title: "[Experiment] "
+labels: ["new-experiment"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Fill this in to register a new experiment. The workflow will create a folder and `metadata.yml`.
+
+  - type: input
+    id: id
+    attributes:
+      label: Experiment ID
+      description: "Format: exp-YYYY-MM-slug (e.g., exp-2025-09-cloveritol)"
+      placeholder: "exp-YYYY-MM-slug"
+    validations:
+      required: true
+
+  - type: input
+    id: title
+    attributes:
+      label: Title
+      placeholder: "Cloveritol Efficacy Judgement Task"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      placeholder: "1–3 sentences describing the task, measurement, and aims."
+
+  - type: dropdown
+    id: status
+    attributes:
+      label: Status
+      options: ["draft", "pilot", "active", "archived"]
+      default: 2
+
+  - type: input
+    id: short_title
+    attributes:
+      label: Short title
+      placeholder: "Cloveritol Efficacy"
+
+  - type: input
+    id: authors
+    attributes:
+      label: Authors (comma-separated)
+      placeholder: "Kit S. Double <kit.double@sydney.edu.au>, Jane Doe <jane@uni.edu>"
+
+  - type: input
+    id: tags
+    attributes:
+      label: Tags (comma-separated)
+      placeholder: "metacognition, EI, jsPsych, DDM"
+
+  - type: input
+    id: datapipes
+    attributes:
+      label: DataPipe IDs (comma-separated)
+      placeholder: "DP-00123, DP-00456"
+
+  - type: input
+    id: ethics_id
+    attributes:
+      label: Ethics ID
+      placeholder: "USYD HREC 2025/123"
+
+  - type: textarea
+    id: links
+    attributes:
+      label: Links (YAML)
+      description: "Provide YAML for any links you have. You can leave unknown ones blank."
+      placeholder: |
+        github: https://github.com/usyd-meta-lab/experiments/tree/main/exp-2025-09-cloveritol
+        live: https://usyd-meta-lab.github.io/experiments/exp-2025-09-cloveritol/
+        osf: https://osf.io/abcd1/
+        prereg: https://osf.io/efgh2/
+
+  - type: textarea
+    id: sample
+    attributes:
+      label: Sample (YAML, optional)
+      description: "Population, target N, etc."
+      placeholder: |
+        population: adults
+        n_target: 300
+
+  - type: textarea
+    id: measures
+    attributes:
+      label: Measures (YAML list, optional)
+      placeholder: |
+        - confidence
+        - efficacy_rating
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Extra YAML (optional)
+      description: "Anything else to merge into metadata.yml"
+      placeholder: |
+        license: CC-BY-4.0
