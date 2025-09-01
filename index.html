@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>USYD Meta Lab • Experiments</title>
+  <meta name="description" content="Catalog of experiments from USYD Meta Lab" />
+  <style>
+    :root {
+      --bg: #ffffff;
+      --fg: #0f172a;
+      --muted: #475569;
+      --border: #e5e7eb;
+      --chip: #eef2ff;
+      --accent: #1e40af;
+      --accent-muted: #dbeafe;
+      --radius: 14px;
+      --space: 14px;
+      --maxw: 1100px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font: 16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji;
+      background: var(--bg); color: var(--fg);
+    }
+    header {
+      border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; backdrop-filter: blur(6px); background: rgba(255,255,255,.8);
+    }
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 18px var(--space); }
+    .title { display:flex; gap:10px; align-items:center; }
+    .title h1 { font-size: 22px; margin: 0; }
+    .title small { color: var(--muted); }
+
+    /* Controls */
+    .controls { display:grid; gap: 10px; grid-template-columns: 2fr 1fr 1fr 1fr; align-items:end; margin-top: 12px; }
+    @media (max-width: 900px){ .controls{ grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 520px){ .controls{ grid-template-columns: 1fr; } }
+    label { display:block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+    input[type="search"], select {
+      width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff;
+    }
+    .chips { display:flex; flex-wrap: wrap; gap:6px; margin-top: 6px; }
+    .chip { display:inline-flex; align-items:center; gap:6px; padding: 4px 8px; border-radius: 999px; background: var(--chip); border: 1px solid var(--border); font-size: 12px; }
+    .chip button { border: 0; background: transparent; cursor: pointer; color: var(--muted); font-size: 14px; }
+
+    /* Cards */
+    .grid { display:grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
+    @media (max-width: 1100px){ .grid{ grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 680px){ .grid{ grid-template-columns: 1fr; } }
+    .card {
+      border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; background: #fff;
+      display:flex; flex-direction: column; gap: 8px;
+    }
+    .card h3 { margin: 0; font-size: 18px; line-height: 1.25; }
+    .meta { font-size: 13px; color: var(--muted); display:flex; gap: 10px; flex-wrap: wrap; }
+    .tags { display:flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+    .tag { background: var(--accent-muted); color: var(--accent); padding: 2px 8px; border-radius: 8px; font-size: 12px; }
+    .links a { text-decoration: none; color: var(--accent); }
+    .links a + a::before { content: " · "; color: var(--muted); }
+    .count { color: var(--muted); font-size: 13px; margin-top: 6px; }
+
+    .empty {
+      text-align: center; color: var(--muted); padding: 48px 16px; border: 1px dashed var(--border); border-radius: var(--radius);
+    }
+    footer { border-top: 1px solid var(--border); margin-top: 28px; }
+    .sr-only { position:absolute; left:-9999px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="title">
+        <h1>USYD Meta Lab — Experiments</h1>
+        <small id="updated"></small>
+      </div>
+
+      <div class="controls" role="region" aria-label="Filters">
+        <div>
+          <label for="q">Search (title, description, tags)</label>
+          <input id="q" type="search" placeholder="e.g., metacognition, jsPsych, MSCEIT…" />
+        </div>
+        <div>
+          <label for="status">Status</label>
+          <select id="status">
+            <option value="">All</option>
+            <option>draft</option>
+            <option>pilot</option>
+            <option selected>active</option>
+            <option>archived</option>
+          </select>
+        </div>
+        <div>
+          <label for="sort">Sort</label>
+          <select id="sort">
+            <option value="created_desc" selected>Newest first</option>
+            <option value="created_asc">Oldest first</option>
+            <option value="updated_desc">Recently updated</option>
+            <option value="title_asc">Title A→Z</option>
+          </select>
+        </div>
+        <div>
+          <label for="tagInput">Tag filter (press Enter)</label>
+          <input id="tagInput" type="search" placeholder="Add tag…" />
+          <div id="tagChips" class="chips" aria-live="polite"></div>
+        </div>
+      </div>
+
+      <div class="count" id="count">Loading…</div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section id="grid" class="grid" aria-live="polite"></section>
+    <div id="empty" class="empty" hidden>No experiments match your filters.</div>
+  </main>
+
+  <footer>
+    <div class="wrap" style="font-size:13px;color:var(--muted);">
+      Data source: <code id="src"></code>. Update your catalog in GitHub and this page will auto-reflect it on next deploy.
+    </div>
+  </footer>
+
+  <script>
+    // ─────────────────────────────────────────────────────────────────────────────
+    // CONFIG: If experiments.json is on the SAME site, set to '/experiments.json'.
+    // Otherwise, point to your Pages URL, e.g.:
+    // 'https://usyd-meta-lab.github.io/experiments/experiments.json'
+    const CATALOG_URL = '/experiments.json'; // ← change if needed
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    const els = {
+      grid: document.getElementById('grid'),
+      empty: document.getElementById('empty'),
+      q: document.getElementById('q'),
+      status: document.getElementById('status'),
+      sort: document.getElementById('sort'),
+      count: document.getElementById('count'),
+      updated: document.getElementById('updated'),
+      src: document.getElementById('src'),
+      tagInput: document.getElementById('tagInput'),
+      tagChips: document.getElementById('tagChips'),
+    };
+
+    let DATA = [];
+    let TAGS = [];
+
+    function normalize(x){ return (x ?? '').toString().toLowerCase(); }
+
+    function recordMatches(r){
+      const q = normalize(els.q.value);
+      const stat = els.status.value;
+      const hasStatus = !stat || (r.status === stat);
+
+      const tagOk = TAGS.length === 0 || (Array.isArray(r.tags) && TAGS.every(t => r.tags.map(normalize).includes(normalize(t))));
+
+      const hay = [
+        r.id, r.title, r.short_title, r.description,
+        ...(r.tags || []), ...(r.authors || [])
+      ].map(normalize).join(' ');
+      const qOk = !q || hay.includes(q);
+
+      return hasStatus && tagOk && qOk;
+    }
+
+    function sortRecords(list){
+      const mode = els.sort.value;
+      const byDate = (k, dir=-1) => (a,b)=> (normalize(b[k])>normalize(a[k])?1:-1)*dir;
+      const byTitle = (a,b)=> normalize(a.title).localeCompare(normalize(b.title));
+      if(mode==='created_asc') return list.sort(byDate('date_created', +1));
+      if(mode==='updated_desc') return list.sort(byDate('date_updated', -1));
+      if(mode==='title_asc') return list.sort(byTitle);
+      return list.sort(byDate('date_created', -1));
+    }
+
+    function render(){
+      const items = sortRecords(DATA.filter(recordMatches));
+      els.count.textContent = items.length
+        ? `${items.length} experiment${items.length===1?'':'s'}`
+        : '0 experiments';
+
+      if(items.length === 0){
+        els.grid.innerHTML = '';
+        els.empty.hidden = false;
+        return;
+      }
+      els.empty.hidden = true;
+      els.grid.innerHTML = items.map(r => card(r)).join('');
+    }
+
+    const chip = (t,i)=> `<span class="chip">${t}<button aria-label="Remove ${t}" onclick="removeTag(${i})">✕</button></span>`;
+    function refreshChips(){
+      els.tagChips.innerHTML = TAGS.map((t,i)=>chip(t,i)).join('');
+    }
+    function removeTag(i){ TAGS.splice(i,1); refreshChips(); render(); }
+    function addTagFromInput(){
+      const v = els.tagInput.value.trim();
+      if(v && !TAGS.includes(v)){ TAGS.push(v); refreshChips(); render(); }
+      els.tagInput.value = '';
+    }
+
+    function card(x){
+      const title = x.short_title || x.title || x.id;
+      const desc = x.description || '';
+      const tags = (x.tags || []).map(t => `<span class="tag">${t}</span>`).join('');
+      const links = [
+        x?.links?.live ? `<a href="${x.links.live}" target="_blank" rel="noopener">Live</a>` : '',
+        x?.links?.github ? `<a href="${x.links.github}" target="_blank" rel="noopener">Code</a>` : '',
+        x?.links?.osf ? `<a href="${x.links.osf}" target="_blank" rel="noopener">OSF</a>` : '',
+        x?.links?.prereg ? `<a href="${x.links.prereg}" target="_blank" rel="noopener">Prereg</a>` : ''
+      ].filter(Boolean).join('');
+
+      const created = x.date_created || '';
+      const updated = x.date_updated ? ` · Updated: ${x.date_updated}` : '';
+
+      return `
+        <article class="card">
+          <h3>${escapeHTML(title)}</h3>
+          <div class="meta">Status: ${escapeHTML(x.status || '—')} · Created: ${escapeHTML(created)}${updated}</div>
+          ${desc ? `<p>${escapeHTML(desc)}</p>` : ''}
+          ${tags ? `<div class="tags">${tags}</div>` : ''}
+          ${links ? `<div class="links">${links}</div>` : ''}
+        </article>
+      `;
+    }
+
+    function escapeHTML(s){
+      return (s??'').toString()
+        .replaceAll('&','&amp;').replaceAll('<','&lt;')
+        .replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'","&#39;");
+    }
+
+    async function init(){
+      els.src.textContent = CATALOG_URL;
+      try{
+        const res = await fetch(CATALOG_URL, { cache: 'no-store' });
+        if(!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        DATA = Array.isArray(json) ? json : [];
+        // Derive "last updated" display from max(date_updated/date_created)
+        const dates = DATA.map(r => r.date_updated || r.date_created).filter(Boolean).sort().reverse();
+        if(dates[0]) els.updated.textContent = `Updated: ${dates[0]}`;
+        render();
+      }catch(err){
+        els.count.textContent = 'Could not load catalog.';
+        els.grid.innerHTML = '';
+        els.empty.hidden = false;
+        els.empty.textContent = `Failed to load ${CATALOG_URL}. Check that your GitHub Action published experiments.json.`;
+        console.error(err);
+      }
+    }
+
+    // Wire up events
+    els.q.addEventListener('input', render);
+    els.status.addEventListener('change', render);
+    els.sort.addEventListener('change', render);
+    els.tagInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); addTagFromInput(); } });
+
+    // Allow setting catalog via URL ?src=
+    (function overrideFromQuery(){
+      const url = new URL(window.location);
+      const src = url.searchParams.get('src');
+      if(src){ window.CATALOG_URL = src; }
+    })();
+
+    init();
+  </script>
+
+  <noscript>
+    <div class="wrap" style="margin-top:20px;color:#b91c1c">
+      This page requires JavaScript to fetch and display the experiment catalog.
+    </div>
+  </noscript>
+</body>
+</html>
