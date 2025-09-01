@@ -1,0 +1,89 @@
+name: Create experiment from issue
+on:
+  issues:
+    types: [opened, edited]
+jobs:
+  create:
+    if: contains(github.event.issue.labels.*.name, 'new-experiment')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse issue body to env
+        id: parse
+        run: |
+          python - << 'PY'
+          import os, re, sys, yaml, json
+          body = os.environ["ISSUE_BODY"]
+          # GitHub forms come in a structured block in the issue body.
+          # We’ll extract fields naïvely; adjust as needed.
+          def get_field(label):
+              m = re.search(rf'### {re.escape(label)}\n\n(.+?)\n', body, re.S)
+              return (m.group(1).strip() if m else "").strip()
+          data = {
+            "id": get_field("Experiment ID"),
+            "title": get_field("Title"),
+            "description": get_field("Description"),
+            "status": get_field("Status"),
+            "short_title": get_field("Short title"),
+            "authors": [a.strip() for a in get_field("Authors (comma-separated)").split(",") if a.strip()],
+            "tags": [t.strip() for t in get_field("Tags (comma-separated)").split(",") if t.strip()],
+          }
+          links_yaml = get_field("Links (yaml)")
+          extra_yaml = get_field("Extra YAML (optional)")
+          if links_yaml:
+              data["links"] = yaml.safe_load(links_yaml)
+          if extra_yaml:
+              data.update(yaml.safe_load(extra_yaml) or {})
+          print("::set-output name=payload::" + json.dumps(data))
+          PY
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+
+      - name: Fail if no ID
+        run: |
+          test -n "${{ fromJson(steps.parse.outputs.payload).id }}" || (echo "Missing id" && exit 1)
+
+      - name: Create folder and metadata
+        run: |
+          ID="${{ fromJson(steps.parse.outputs.payload).id }}"
+          mkdir -p "experiments/$ID"
+          echo "version: 1.0.0" > experiments/$ID/metadata.yml
+          echo "date_created: $(date -u +%F)" >> experiments/$ID/metadata.yml
+          echo "date_updated: $(date -u +%F)" >> experiments/$ID/metadata.yml
+          echo "${{ steps.parse.outputs.payload }}" > /tmp/payload.json
+          # Merge payload JSON into YAML
+          python - << 'PY'
+          import json, sys, yaml
+          import os
+          idata = json.load(open("/tmp/payload.json"))
+          path = f"experiments/{idata['id']}/metadata.yml"
+          with open(path) as f:
+              base = yaml.safe_load(f)
+          base.update(idata)
+          with open(path, "w") as f:
+              yaml.safe_dump(base, f, sort_keys=False)
+          PY
+
+      - name: Commit files
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add experiments/${{ fromJson(steps.parse.outputs.payload).id }}/metadata.yml
+          git commit -m "Create experiment ${{ fromJson(steps.parse.outputs.payload).id }} from issue"
+          git push
+
+      - name: Comment back on issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const id = JSON.parse(core.getInput('payload')).id
+            github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.issue.number,
+              body: `✅ Created \`experiments/${id}\` with \`metadata.yml\`. Edit as needed and push!`
+            })
+          payload: ${{ steps.parse.outputs.payload }}

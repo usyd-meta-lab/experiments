@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["id", "title", "status", "date_created"],
+  "properties": {
+    "id": {"type": "string"},
+    "title": {"type": "string"},
+    "short_title": {"type": "string"},
+    "description": {"type": "string"},
+    "version": {"type": "string"},
+    "status": {"enum": ["draft", "pilot", "active", "archived"]},
+    "date_created": {"type": "string", "format": "date"},
+    "date_updated": {"type": "string", "format": "date"},
+    "tags": {"type": "array", "items": {"type": "string"}},
+    "authors": {"type": "array", "items": {"type": "string"}},
+    "contact": {"type": "string"},
+    "links": {"type": "object"},
+    "data": {"type": "object"},
+    "ethics": {"type": "object"},
+    "measures": {"type": "array", "items": {"type": "string"}},
+    "sample": {"type": "object"},
+    "license": {"type": "string"}
+  },
+  "additionalProperties": true
+}
