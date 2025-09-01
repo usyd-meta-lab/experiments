@@ -18,12 +18,9 @@ jobs:
       - name: Check out repo
         uses: actions/checkout@v4
 
-      - name: Set up Python + deps
+      - name: Set up Python deps
         run: |
           python3 -V
-          python3 - <<'PY'
-          import sys; sys.exit(0)
-          PY
           python3 -m pip install --quiet pyyaml
 
       - name: Parse Issue Form → JSON payload
@@ -32,32 +29,30 @@ jobs:
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
           python3 - <<'PY'
-          import os, re, json, yaml
+          import os, re, json, yaml, sys
 
-          body = os.environ["ISSUE_BODY"] or ""
+          body = os.environ.get("ISSUE_BODY", "")
 
-          # Helper to extract the content under "### Label"
-          def get_block(label):
-            # Match "### Label" then capture until next "### " or end
-            m = re.search(rf"^### {re.escape(label)}\s*\n\n([\s\S]*?)(?=\n^### |\Z)", body, re.M)
-            if not m:
-              return ""
-            val = m.group(1).strip()
-            # Strip surrounding code fences if present
-            if val.startswith("```") and val.endswith("```"):
-              val = "\n".join(val.splitlines()[1:-1]).strip()
-            return val
+          # Extract content under "### <Label>" until next "### " or end
+          def get_block(label:str) -> str:
+              m = re.search(rf"^### {re.escape(label)}\s*\n\n([\s\S]*?)(?=\n^### |\Z)", body, re.M)
+              if not m:
+                  return ""
+              val = m.group(1).strip()
+              # Strip fenced code blocks if present
+              if val.startswith("```") and val.endswith("```"):
+                  val = "\n".join(val.splitlines()[1:-1]).strip()
+              return val
 
-          # Pull fields by their **visible labels** in your Issue Form
           data = {
-            "id":           get_block("Experiment ID"),
-            "title":        get_block("Title"),
-            "description":  get_block("Description"),
-            "status":       get_block("Status") or "draft",
-            "short_title":  get_block("Short title"),
+              "id":          get_block("Experiment ID"),
+              "title":       get_block("Title"),
+              "description": get_block("Description"),
+              "status":      get_block("Status") or "draft",
+              "short_title": get_block("Short title"),
           }
 
-          # Authors/tags as comma-separated → arrays
+          # Comma-separated → arrays
           authors = [a.strip() for a in get_block("Authors (comma-separated)").split(",") if a.strip()]
           tags    = [t.strip() for t in get_block("Tags (comma-separated)").split(",") if t.strip()]
           if authors: data["authors"] = authors
@@ -65,53 +60,50 @@ jobs:
 
           # Optional single-line extras
           ethics_id = get_block("Ethics ID")
-          datapipes = [d.strip() for d in get_block("DataPipe IDs (comma-separated)").split(",") if d.strip()]
           if ethics_id:
-            data.setdefault("ethics", {})["id"] = ethics_id
+              data.setdefault("ethics", {})["id"] = ethics_id
+
+          datapipes = [d.strip() for d in get_block("DataPipe IDs (comma-separated)").split(",") if d.strip()]
           if datapipes:
-            data.setdefault("data", {})["datapipes"] = datapipes
+              data.setdefault("data", {})["datapipes"] = datapipes
 
-          # YAML blocks (safe to leave blank)
-          def merge_yaml_block(key, label):
-            raw = get_block(label)
-            if raw:
-              try:
-                obj = yaml.safe_load(raw)
-                if obj is not None:
-                  data[key] = obj
-              except Exception:
-                # If user pasted non-YAML, ignore quietly; schema will catch later
-                pass
-
-          merge_yaml_block("links",   "Links (YAML)")
-          merge_yaml_block("sample",  "Sample (YAML, optional)")
-          merge_yaml_block("measures","Measures (YAML list, optional)")
+          # YAML blocks
+          for key, label in [
+              ("links",    "Links (YAML)"),
+              ("sample",   "Sample (YAML, optional)"),
+              ("measures", "Measures (YAML list, optional)"),
+          ]:
+              raw = get_block(label)
+              if raw:
+                  try:
+                      val = yaml.safe_load(raw)
+                      if val is not None:
+                          data[key] = val
+                  except Exception:
+                      pass
 
           # Freeform extra YAML (merged last)
           extra = get_block("Extra YAML (optional)")
           if extra:
-            try:
-              more = yaml.safe_load(extra)
-              if isinstance(more, dict):
-                data.update(more)
-            except Exception:
-              pass
+              try:
+                  more = yaml.safe_load(extra)
+                  if isinstance(more, dict):
+                      data.update(more)
+              except Exception:
+                  pass
 
-          # Minimal validation
           if not data.get("id"):
-            print("::error::Missing 'Experiment ID' field in the issue form.")
-            raise SystemExit(1)
-          if not data.get("title"):
-            print("::warning::No Title provided; will fall back to ID in UI.")
+              print("::error::Missing 'Experiment ID' in Issue Form.")
+              sys.exit(1)
 
-          # Compact JSON string (safe to pass as an output)
-          payload = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
+          payload = json.dumps(data, separators=(',', ':'), ensure_ascii=False)
 
-          # Set *multi-line* output to avoid quoting issues
-          print("payload<<EOF")
-          print(payload)
-          print("EOF")
-          PY >> "$GITHUB_OUTPUT"
+          # Emit output safely (multiline/characters) via $GITHUB_OUTPUT
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write("payload<<EOF\n")
+              fh.write(payload)
+              fh.write("\nEOF\n")
+          PY
 
       - name: Create/merge metadata.yml in experiments/<id>/
         env:
@@ -125,10 +117,8 @@ jobs:
 
           base_dir = pathlib.Path("experiments") / eid
           meta_path = base_dir / "metadata.yml"
-
           base_dir.mkdir(parents=True, exist_ok=True)
 
-          # Start with existing metadata if present; else with sensible defaults
           if meta_path.exists():
             with open(meta_path, "r", encoding="utf-8") as f:
               meta = yaml.safe_load(f) or {}
@@ -153,7 +143,7 @@ jobs:
           git add experiments/**/metadata.yml
           if git diff --cached --quiet; then
             echo "No changes to commit."
-          else
+          else:
             git commit -m "Create/update experiment metadata from issue"
             git push
           fi
@@ -168,6 +158,6 @@ jobs:
             await github.rest.issues.createComment({
               ...context.repo,
               issue_number: context.issue.number,
-              body: `✅ Created/updated \`${path}\`.\n\nYou can edit that file and push changes; the catalog will rebuild automatically.`
+              body: `✅ Created/updated \`${path}\`.\n\nEdit that file as needed; the catalog will rebuild automatically on push.`
             });
           payload: ${{ steps.parse.outputs.payload }}
