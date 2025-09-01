@@ -83,10 +83,10 @@
         <div>
           <label for="status">Status</label>
           <select id="status">
-            <option value="">All</option>
+            <option value="" selected>All</option>
             <option>draft</option>
             <option>pilot</option>
-            <option selected>active</option>
+            <option>active</option>
             <option>archived</option>
           </select>
         </div>
@@ -126,7 +126,7 @@
     // CONFIG: If experiments.json is on the SAME site, set to '/experiments.json'.
     // Otherwise, point to your Pages URL, e.g.:
     // 'https://usyd-meta-lab.github.io/experiments/experiments.json'
-    const CATALOG_URL = '/experiments.json'; // ← change if needed
+    const CATALOG_URL = 'experiments.json'; // relative to this page (works on GitHub Pages repo paths)
     // ─────────────────────────────────────────────────────────────────────────────
 
     const els = {
@@ -215,7 +215,13 @@
 
       return `
         <article class="card">
-          <h3>${escapeHTML(title)}</h3>
+          <h3>${
+            x?.links?.live
+              ? `<a href="${x.links.live}" target="_blank" rel="noopener">${escapeHTML(title)}</a>`
+              : (x?.links?.github
+                  ? `<a href="${x.links.github}" target="_blank" rel="noopener">${escapeHTML(title)}</a>`
+                  : `${escapeHTML(title)}`)
+          }</h3>
           <div class="meta">Status: ${escapeHTML(x.status || '—')} · Created: ${escapeHTML(created)}${updated}</div>
           ${desc ? `<p>${escapeHTML(desc)}</p>` : ''}
           ${tags ? `<div class="tags">${tags}</div>` : ''}
