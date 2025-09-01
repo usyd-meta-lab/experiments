@@ -1,0 +1,7 @@
+id: exp-sanity
+title: Sanity Check
+status: draft
+description: Minimal record to ensure the catalog finds at least one item.
+date_created: 2025-09-01
+date_updated: 2025-09-01
+tags: [test]
